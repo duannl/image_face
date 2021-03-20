@@ -1,0 +1,24 @@
+name: image_face
+description: This plugin only one class ImageFace this class only one static function numberOfFaces accept one parameter image, get native detect result by _channel.
+version: 1.0.0
+homepage: https://github.com/duannl/image_face
+
+environment:
+  sdk: ">=2.7.0 <3.0.0"
+  flutter: ">=1.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: app.windbreaker.plugins.imageface.image_face
+        pluginClass: ImageFacePlugin
+      ios:
+        pluginClass: ImageFacePlugin
