@@ -18,6 +18,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _displayMsg = '';
+  File _image;
 
   @override
   void initState() {
@@ -46,6 +47,7 @@ class _MyAppState extends State<MyApp> {
 
     setState(() {
       _displayMsg = displayMsg;
+      _image = pickedFile;
     });
   }
 
@@ -56,14 +58,19 @@ class _MyAppState extends State<MyApp> {
         appBar: AppBar(
           title: const Text('Plugin example app'),
         ),
-        body: Center(
-          // child: Text('Running on: $_displayMsg\n'),
-          // pickFace
-          child: Column(
-            children: <Widget>[
-              Text('$_displayMsg\n'),
-              TextButton(child: Text('Select image'), onPressed: pickFace),
-            ],
+        body: SingleChildScrollView(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                const SizedBox(height: 50),
+                Text('$_displayMsg\n'),
+                const SizedBox(height: 50),
+                TextButton(child: Text('Select image'), onPressed: pickFace),
+                const SizedBox(height: 50),
+                if (_image != null) Image.file(_image)
+              ],
+            ),
           ),
         ),
       ),

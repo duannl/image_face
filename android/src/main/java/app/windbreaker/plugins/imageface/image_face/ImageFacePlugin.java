@@ -15,6 +15,9 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.FaceDetector;
 import android.util.Log;
+import android.media.ExifInterface;
+import android.graphics.Matrix;
+
 /** ImageFacePlugin */
 public class ImageFacePlugin implements FlutterPlugin, MethodCallHandler {
   /// The MethodChannel that will the communication between Flutter and native
@@ -76,42 +79,85 @@ public class ImageFacePlugin implements FlutterPlugin, MethodCallHandler {
             if (!file.exists()) {
                 return 0;
             }
+            
+            // FaceDetector only works with bitmap 565 format
+            BitmapFactory.Options bitmap_options = new BitmapFactory.Options();
+            bitmap_options.inPreferredConfig = Bitmap.Config.RGB_565;
+            Bitmap srcImg = BitmapFactory.decodeFile(path, bitmap_options);
+            
+            // FaceDetector is not working if the image's rotated
+            int rotation = getCameraPhotoOrientation(path);
+            if (rotation != 0) {
+              Matrix matrix = new Matrix();
+              matrix.setRotate(rotation);
+              srcImg = Bitmap.createBitmap(srcImg, 0, 0, srcImg.getWidth(), srcImg.getHeight(), matrix, true);
+            }
+
+            int w = srcImg.getWidth();
+            int h = srcImg.getHeight();
+
+            // Improve performance for FaceDetector
+            int constraintSize = 640;
+            if (w > constraintSize || h > constraintSize) {
+              if (w > h) {
+                w = (int)(w * constraintSize / h);
+                h = constraintSize;
+              } else {
+                h = (int)(h * constraintSize / w);
+                w = constraintSize;
+              }
+            }
+            
             // chiều rộng của ảnh phải là số chẵn
             // the image width needs to be even
             // https://stackoverflow.com/a/39136102/2721547
-            Bitmap srcImg = BitmapFactory.decodeFile(path);
-            Bitmap srcFace = srcImg.copy(Bitmap.Config.RGB_565, true);
-            srcImg = null;
-            int w = srcFace.getWidth();
-            int h = srcFace.getHeight();
             if (w % 2 == 1) {
                 w++;
-                srcFace = Bitmap.createScaledBitmap(srcFace,
-                        srcFace.getWidth()+1, srcFace.getHeight(), false);
             }
             if (h % 2 == 1) {
                 h++;
-                srcFace = Bitmap.createScaledBitmap(srcFace,
-                        srcFace.getWidth(), srcFace.getHeight()+1, false);
-            } 
-
-            Log.e("[Android Plugin]","bitmap width:" + srcFace.getWidth() + " height:" + srcFace.getHeight());
-            int MAX_FACE = 10;
-            FaceDetector fdet_ = new FaceDetector(srcFace.getWidth(), srcFace.getHeight(), MAX_FACE);
-            FaceDetector.Face[] fullResults = new FaceDetector.Face[MAX_FACE];
-            fdet_.findFaces(srcFace, fullResults);
-
-            int counter = 0;
-            for (int i = 0; i < MAX_FACE; i++) {
-              if (fullResults[i] != null) {
-                  counter = counter + 1;
-              }
             }
-            return counter;
+            
+            srcImg = Bitmap.createScaledBitmap(srcImg, w, h, false);
+
+            Log.i("[Android Plugin]","bitmap width:" + srcImg.getWidth() + " height:" + srcImg.getHeight());
+            int MAX_FACE = 10;
+            FaceDetector fdet_ = new FaceDetector(srcImg.getWidth(), srcImg.getHeight(), MAX_FACE);
+            FaceDetector.Face[] fullResults = new FaceDetector.Face[MAX_FACE];
+            int faceCount = fdet_.findFaces(srcImg, fullResults);
+            return faceCount;
         }
         catch (Exception e)
         {
             return 0;
         }
     }
+
+    public int getCameraPhotoOrientation(String imagePath){
+      int rotate = 0;
+      try {
+          File imageFile = new File(imagePath);
+
+          ExifInterface exif = new ExifInterface(imageFile.getAbsolutePath());
+          int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+
+          switch (orientation) {
+          case ExifInterface.ORIENTATION_ROTATE_270:
+              rotate = 270;
+              break;
+          case ExifInterface.ORIENTATION_ROTATE_180:
+              rotate = 180;
+              break;
+          case ExifInterface.ORIENTATION_ROTATE_90:
+              rotate = 90;
+              break;
+          }
+
+          Log.i("RotateImage", "Exif orientation: " + orientation);
+          Log.i("RotateImage", "Rotate value: " + rotate);
+      } catch (Exception e) {
+          e.printStackTrace();
+      }
+      return rotate;
+  }
 }
