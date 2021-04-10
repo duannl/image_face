@@ -8,15 +8,19 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
+import io.flutter.plugin.common.MethodChannel.Result;
 
-import android.util.Printer;
 import java.io.File;
+import java.io.IOException;
+
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.media.FaceDetector;
 import android.util.Log;
 import android.media.ExifInterface;
 import android.graphics.Matrix;
+
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 
 /** ImageFacePlugin */
 public class ImageFacePlugin implements FlutterPlugin, MethodCallHandler {
@@ -56,8 +60,8 @@ public class ImageFacePlugin implements FlutterPlugin, MethodCallHandler {
   @Override
   public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
     if (call.method.equals("numberOfFaces")) {
-      String strpath = call.argument("image");
-      result.success(numberOfFaces(strpath));
+        String path = call.argument("image");
+        numberOfFaces(path, result);
     } else {
       result.notImplemented();
     }
@@ -69,95 +73,124 @@ public class ImageFacePlugin implements FlutterPlugin, MethodCallHandler {
     
   }
 
-  public int numberOfFaces(String path)
+  public void numberOfFaces(String path, Result rawResult)
     {
+        Result result = new MethodResultWrapper(rawResult);
         try {
             if (path == null || path.length() == 0) {
-                return 0;
+                result.success(0);
+                return;
             }
             File file = new File(path);
             if (!file.exists()) {
-                return 0;
+                result.success(0);
+                return;
             }
-            
-            // FaceDetector only works with bitmap 565 format
-            BitmapFactory.Options bitmap_options = new BitmapFactory.Options();
-            bitmap_options.inPreferredConfig = Bitmap.Config.RGB_565;
-            Bitmap srcImg = BitmapFactory.decodeFile(path, bitmap_options);
-            
             // FaceDetector is not working if the image's rotated
-            int rotation = getCameraPhotoOrientation(path);
-            if (rotation != 0) {
-              Matrix matrix = new Matrix();
-              matrix.setRotate(rotation);
-              srcImg = Bitmap.createBitmap(srcImg, 0, 0, srcImg.getWidth(), srcImg.getHeight(), matrix, true);
-            }
+            Bitmap srcImg = rotateBitmap(path);
 
             int w = srcImg.getWidth();
             int h = srcImg.getHeight();
 
             // Improve performance for FaceDetector
-            int constraintSize = 640;
-            if (w > constraintSize || h > constraintSize) {
-              if (w > h) {
-                w = (int)(w * constraintSize / h);
-                h = constraintSize;
-              } else {
-                h = (int)(h * constraintSize / w);
-                w = constraintSize;
-              }
-            }
-            
-            // chiều rộng của ảnh phải là số chẵn
-            // the image width needs to be even
-            // https://stackoverflow.com/a/39136102/2721547
-            if (w % 2 == 1) {
-                w++;
-            }
-            if (h % 2 == 1) {
-                h++;
-            }
-            
+            // https://firebase.google.com/docs/ml-kit/android/detect-faces
+            // For ML Kit to accurately detect faces, input images must contain faces that are represented by sufficient pixel data.
+            // In general, each face you want to detect in an image should be at least 100x100 pixels.
+            // If you want to detect the contours of faces,
+            // ML Kit requires higher resolution input: each face should be at least 200x200 pixels.
+            // => we need to detect at least two faces, so size is at least 400x400 pixels
+            double constraintSize = 600.0;
+            double scale = calcScale((double)w, (double)h, constraintSize, constraintSize);
+            w = (int)((double)w / scale);
+            h = (int)((double)h / scale);
+
             srcImg = Bitmap.createScaledBitmap(srcImg, w, h, false);
 
             Log.i("[Android Plugin]","bitmap width:" + srcImg.getWidth() + " height:" + srcImg.getHeight());
-            int MAX_FACE = 10;
-            FaceDetector fdet_ = new FaceDetector(srcImg.getWidth(), srcImg.getHeight(), MAX_FACE);
-            FaceDetector.Face[] fullResults = new FaceDetector.Face[MAX_FACE];
-            int faceCount = fdet_.findFaces(srcImg, fullResults);
-            return faceCount;
+            // rotation degree = 0 because we already rotate srcImage
+            new MLKitFace().runFaceContourDetection(srcImg, 0, result);
         }
         catch (Exception e)
         {
-            return 0;
+            result.success(0);
         }
     }
 
-    public int getCameraPhotoOrientation(String imagePath){
-      int rotate = 0;
-      try {
-          File imageFile = new File(imagePath);
+    /* https://pub.dev/packages/flutter_image_compress
+    minWidth and minHeight are constraints on image scaling
+    For example, a 4000*2000 image, minWidth set to 1920, minHeight set to 1080
+    var scale = calcScale(srcWidth: 4000, srcHeight: 2000, minWidth: 1920, minHeight: 1080);
+    print("scale = $scale"); // scale = 1.8518518518518519
+    print("target width = ${4000 / scale}, height = ${2000 / scale}"); // target width = 2160.0, height = 1080.0 */
 
-          ExifInterface exif = new ExifInterface(imageFile.getAbsolutePath());
-          int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+    double calcScale(
+        double srcWidth,
+        double srcHeight,
+        double minWidth,
+        double minHeight
+    ) {
+        double scaleW = srcWidth / minWidth;
+        double scaleH = srcHeight / minHeight;
 
-          switch (orientation) {
-          case ExifInterface.ORIENTATION_ROTATE_270:
-              rotate = 270;
-              break;
-          case ExifInterface.ORIENTATION_ROTATE_180:
-              rotate = 180;
-              break;
-          case ExifInterface.ORIENTATION_ROTATE_90:
-              rotate = 90;
-              break;
-          }
+        return max(1.0, min(scaleW, scaleH));
+    }
 
-          Log.i("RotateImage", "Exif orientation: " + orientation);
-          Log.i("RotateImage", "Rotate value: " + rotate);
-      } catch (Exception e) {
-          e.printStackTrace();
-      }
-      return rotate;
-  }
+    // https://stackoverflow.com/a/20480741
+    public static Bitmap rotateBitmap(String imagePath) {
+        ExifInterface exif = null;
+        Bitmap bitmap = BitmapFactory.decodeFile(imagePath);
+        try {
+            exif = new ExifInterface(imagePath);
+        } catch (IOException e) {
+            e.printStackTrace();
+            Log.i("[Android Plugin]","Fail to read exif of photo");
+            return bitmap;
+        }
+        int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_UNDEFINED);
+
+        Log.i("[Android Plugin]", "Exif orientation: " + orientation);
+
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setRotate(180);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90);
+                break;
+            case ExifInterface.ORIENTATION_NORMAL:
+            default:
+                return bitmap;
+        }
+        try {
+            Bitmap bmRotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            bitmap.recycle();
+            return bmRotated;
+        }
+        catch (OutOfMemoryError e) {
+            e.printStackTrace();
+            Log.i("RotateImage", "Out of memory");
+            return bitmap;
+        }
+    }
 }

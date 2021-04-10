@@ -30,6 +30,11 @@ class _MyAppState extends State<MyApp> {
   Future<void> pickFace() async {
     String displayMsg = 'loading';
     File pickedFile = await ImagePicker.pickImage(source: ImageSource.gallery);
+    setState(() {
+      _displayMsg = displayMsg;
+      _image = pickedFile;
+    });
+
     // Platform messages may fail, so we use a try/catch PlatformException.
     try {
       print('start check');
@@ -47,7 +52,6 @@ class _MyAppState extends State<MyApp> {
 
     setState(() {
       _displayMsg = displayMsg;
-      _image = pickedFile;
     });
   }
 
