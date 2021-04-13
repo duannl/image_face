@@ -18,7 +18,8 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _displayMsg = '';
-  File _image;
+  File? _image;
+  final picker = ImagePicker();
 
   @override
   void initState() {
@@ -29,16 +30,20 @@ class _MyAppState extends State<MyApp> {
   // Platform messages are asynchronous, so we initialize in an async method.
   Future<void> pickFace() async {
     String displayMsg = 'loading';
-    File pickedFile = await ImagePicker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await picker.getImage(source: ImageSource.gallery);
     setState(() {
       _displayMsg = displayMsg;
-      _image = pickedFile;
+      if (pickedFile != null) {
+        _image = File(pickedFile.path);
+      } else {
+        _image = null;
+      }
     });
 
     // Platform messages may fail, so we use a try/catch PlatformException.
     try {
       print('start check');
-      int value = await ImageFace.numberOfFaces(pickedFile);
+      int value = await ImageFace.numberOfFaces(_image);
       print('end check');
       displayMsg = 'number of faces: $value';
     } on PlatformException {
@@ -72,7 +77,7 @@ class _MyAppState extends State<MyApp> {
                 const SizedBox(height: 50),
                 TextButton(child: Text('Select image'), onPressed: pickFace),
                 const SizedBox(height: 50),
-                if (_image != null) Image.file(_image)
+                if (_image != null) Image.file(_image!)
               ],
             ),
           ),

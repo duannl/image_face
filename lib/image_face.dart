@@ -9,7 +9,7 @@ class ImageFace {
   static const MethodChannel _channel = const MethodChannel('image_face');
 
   /// return the number of faces in the image
-  static Future<int> numberOfFaces(File image) async {
+  static Future<int> numberOfFaces(File? image) async {
     if (image == null) {
       // if the file is null it is no face
       return 0;
